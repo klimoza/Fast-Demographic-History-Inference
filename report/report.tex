@@ -1,0 +1,249 @@
+\documentclass[10pt]{article}
+
+\usepackage[T2A]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[english,russian]{babel}
+\usepackage[a4paper,includeheadfoot,top=5mm,bottom=10mm,left=10mm,right=10mm]{geometry}
+
+\usepackage{etoolbox}
+\usepackage{lastpage}
+\usepackage{fancyhdr}
+\usepackage{enumerate}
+\usepackage[bookmarks]{hyperref}
+\usepackage{framed}
+
+\usepackage{xparse}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{mathtools}
+\usepackage{cancel}
+\usepackage{tikz}
+
+\theoremstyle{plain}
+\newtheorem{lemma}{Лемма}
+\newtheorem*{lemma*}{Лемма}
+
+\theoremstyle{remark}
+\newtheorem*{remark}{Замечание}
+
+\newcommand{\R}{\mathbb{R}}
+\renewcommand{\C}{\mathbb{C}}
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\Q}{\mathbb{Q}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\E}{\mathbb{E}}
+\newcommand{\D}{\mathbb{D}}
+\renewcommand{\P}{\mathbb{P}}
+
+\makeatother
+
+\renewcommand{\le}{\leqslant}
+\renewcommand{\ge}{\geqslant}
+\renewcommand{\leq}{\leqslant}
+\renewcommand{\geq}{\geqslant}
+
+\DeclareMathOperator*{\res}{res}
+
+\frenchspacing
+
+\pagestyle{fancy}
+
+\lhead{Adjoint-State Method for Fast
+Demographic History Inference, весна 2021/22}
+\chead{}
+\rhead{Иван Климов}
+
+\lfoot{}
+\cfoot{\thepage\t{/}\pageref*{LastPage}}
+\rfoot{}
+
+\title{Отчет?}
+\author{Климов Иван}
+\date{}
+\begin{document}
+\maketitle
+
+В дальнейших рассуждениях будем считать число популяций равное единице.
+
+Функция, которую мы хотим оптимизировать:
+\begin{equation*}
+  h(\Theta | S) = \prod_{d = 0 \dotsc n} \frac{e^{-M[d]} M[d]^{S[d]}}{S[d]!}
+\end{equation*}
+
+Посмотрим что вообще хочется знать в общем случае:
+\begin{equation*}
+  \frac{\mathrm{d}h}{\mathrm{d}\theta} = \frac{\partial h}{\partial \phi} \frac{\partial \phi}{\partial \theta} + \frac{\partial h}{\partial \theta}
+\end{equation*}
+
+Заметим, что в $h$ не используется $\theta$ в явном виде. Поэтому $\frac{\partial h}{\partial \theta} = 0$. 
+Попробуем избежать подсчета $\frac{\partial \phi}{\partial \theta}$ при помощи Adjoint-State Method. Пусть:
+\begin{equation*}
+  \mathcal{L}(\phi(\theta), \theta) = h(\phi(\theta), \theta) + \lambda \cdot F(\phi(\theta), \theta)
+\end{equation*}
+Что такое $F$? Разумеется условие на то, что $\phi(\theta)$ является ровно корнем нашего дифференциального уравнения.
+Продифференцируем Лагранжиан:
+\begin{equation*}
+  \frac{\mathrm{d}\mathcal{L}}{\mathrm{d} \theta} = 
+  \frac{\partial h}{\partial \phi} \frac{\partial \phi}{\partial \theta} +
+  \lambda \cdot \left(\frac{\partial F}{\partial \phi} \frac{\partial \phi}{\partial \theta} + \frac{\partial F}{\partial \theta}\right) =
+  \left(\frac{\partial h}{\partial \phi} + \lambda \frac{\partial F}{\partial \phi}\right) \cdot \frac{\partial \phi}{\partial \theta} + 
+  \lambda \frac{\partial F}{\partial \theta}
+\end{equation*}
+Распишем размерности функций чтобы понимать что вообще происходит(в одномерном случае):
+\begin{itemize}
+  \item $h$ выдает в качестве результата конкретный likehood, поэтому она действует в $\R$
+  \item $\theta$ можно воспринимать как "константную" функцию, она всегда выдает $\R^M$, где $M$ --- количество параметров.
+  \item $\phi$ выдает в качестве результата все ответы на константной сетке, то есть вектор $\R^{N^P}$ или $\R^N$ в случае одной популяции, где $N$ --- количество точек на сетке.
+  \item $F$ выдает то же самое что и $\phi$, поэтому результат это вектор $\R^{N^P}$ или $\R^N$ в случае одной популяции.
+\end{itemize}
+Тогда можем сделать следующие выводы по размерностям производных:
+\begin{itemize}
+  \item $\frac{\mathrm{d} h}{\mathrm{d} \theta}$ размерность $\R^{1 \times M}$
+  \item $\frac{\partial h}{\partial \phi}$ размерность $\R^{1 \times N}$
+  \item $\frac{\partial F}{\partial \phi}$ размерность $\R^{N \times N}$
+  \item $\frac{\partial \phi}{\partial \theta}$ размерность $\R^{N \times M}$
+  \item $\frac{\partial F}{\partial \theta}$ размерность $\R^{N \times M}$
+\end{itemize}
+
+Легко видеть что тогда для получения корректного результата $\lambda$ должна иметь размерность $\R^{1 \times N}$.
+Давайте выберем $\lambda$, так чтобы множитель занулился и нам не пришлось бы считать $\frac{\partial \phi}{\partial \theta}$. Как именно его выбрать?
+Пусть $A \coloneqq \frac{\partial F}{\partial \phi}, b = \frac{\partial h}{\partial \phi}$. Тогда:
+\begin{equation*}
+  \lambda A = -b \implies A^T \lambda^T = -b^T
+\end{equation*}
+Таким образом наш вектор $\lambda$ это просто решение понятной системы уравнений. Теперь нам нужно посчитать три производные:
+
+\begin{itemize}
+  \item $\boxed{\frac{\partial h}{\partial \theta}}$
+
+  Считать градиент от $n + 1$  произведения не очень хочется, так как производная произведения это не
+  произведение производных и там все очень страшно разрастается.
+
+  Тогда можем заметить, что у функции и логарифма одинаковые промежутки монотонности, следовательно можно найти градиент логарифма и это будет то что нам нужно.
+  Тогда получаем следующее равенство:
+  \begin{gather*}
+    \frac{\mathrm{d} \log h}{\mathrm{d} \phi} = \sum_{i = 0}^{n} 
+    \frac{\mathrm{d} M[i]}{\mathrm{d} \phi} \cdot \left(\frac{S[i]}{M[i]} - 1\right)
+  \end{gather*}
+  
+  Свели задачу к нахождению $\frac{\mathrm{d} M[i]}{\mathrm{d} \phi}$ при фиксированном  $i$. Следующим шагом проталкиваем градиент внутрь $M$:
+  \begin{gather*}
+    \frac{\mathrm{d} M[i]}{\mathrm{d} \phi} = 
+    \int_0^1
+    \binom{n}{i} x^{i} (1 - x)^{n - i}  \; \mathrm{d}x
+  \end{gather*}
+  
+  Тогда значение АЧС в клетке можно вычислить приближенно через метод трапеций:
+  \begin{equation*}
+    \frac{\mathrm{d} M[i]}{\mathrm{d} \phi} = \binom{n}{i}\sum_{k = 0}^{N - 1} \frac{x_{k + 1} - x_k}{2} \cdot (x_k^{i} (1 - x_k)^{n - i} + x_{k + 1}^{i} (1 - x_{k + 1})^{n - i})
+  \end{equation*}
+  
+  То есть эта часть решения свелась к нахождению какой-то фиксированной константы, равной численному значению такого интеграла.
+
+  \item $\boxed{\frac{\partial F}{\partial \phi}}$
+%  Не особо понятно с последней производной, зато можно расписать вторую(возьмем определение $F$ из Supplementary materials):
+%  \begin{equation*}
+%    F = \frac{1}{2}\sum_\alpha \frac{\partial^2}{\partial^2 x_\alpha} \left(V^{(\alpha)}\phi\right) - 
+%    \sum_\alpha \frac{\partial}{\partial x_\alpha} \left(M^{(\alpha)}\phi\right) - \frac{\partial \phi}{\partial \tau}
+%  \end{equation*}
+%  Тогда, воспользовавшись тем, что $V^{(\alpha)} = x_\alpha(1 - x_\alpha)$ и $M^{(\alpha)} = \sum_\beta M_{\alpha \leftarrow \beta} (x_\beta - x_\alpha)$ получаем:
+%  \begin{equation*}
+%    \frac{\partial F}{\partial \phi} = \frac{1}{2} \sum_\alpha \frac{\partial^2}{\partial^2 x_\alpha} V^{(\alpha)} -
+%    \sum_\alpha \frac{\partial}{\partial x_\alpha} M^{(\alpha)} = -P + \sum_\alpha \sum_\beta M_{\alpha \leftarrow \beta}
+%  \end{equation*}
+%  Опять получилось что-то невероятное! Таким образом осталось лишь придумать что делать с $\frac{\partial F}{\partial \theta}$.
+  Посмотрим на определение $F$ из основной статьи:
+  \begin{equation*}
+    F = \frac{1}{2} \sum_{i = 1}^{P} \frac{\partial^2}{\partial^2 x_i} \frac{x_i(1 - x_i)}{\nu_i} \phi -
+    \sum_{i = 1}^P \frac{\partial}{\partial x_i} \left(\gamma_i x_i(1 - x_i) + \sum_{j = 1}^P M_{i \leftarrow j} (x_j - x_i) \right)\phi -
+    \frac{\partial}{\partial \tau } \phi
+  \end{equation*}
+  Тогда, сразу воспользовавшись тем что популяция у нас пока одна:
+  \begin{equation*}
+    \frac{\partial F}{\partial \phi} = -\frac{1}{\nu} -\gamma (1 - 2x)
+  \end{equation*}
+
+  \item $\boxed{\frac{\partial F}{\partial \theta}}$
+
+  Если рассмотреть численную схему вычисления $\varphi$, то получим следующее тождество:
+  \begin{equation*}
+    A \varphi^{t + 1} = \varphi^t + C
+  \end{equation*}
+  Где $C$ --- какая-то константа домноженная на базисный вектор, отвечающая за мутации, $A$ --- наша трехдиагональная матрица перехода, а $\varphi$ --- это 
+  вектора, отвечающие за значения функции на сетке в моментах времени $t + 1$ и $t$. Распишем подробнее что же такое $A$ и $C$ в случае одной популяции:
+  \begin{itemize}
+    \item
+    \begin{equation*}
+      C = \frac{\Delta t}{x_1} \cdot \frac{\theta}{x_2 - x_0} \cdot 
+      \begin{pmatrix*}
+        0 \\
+        1 \\
+        0 \\
+        \vdots \\
+        0
+      \end{pmatrix*}
+    \end{equation*}
+    \item Для подсчета матрицы $A$ посмотрим на вывод трехдиагональной системы:
+    \begin{gather*}
+      \frac{\phi^{t + 1}_j - \phi^t_j}{\Delta t} = \frac{1}{\Delta_j}\left(F^{t + 1}_{j + 1/2} - F^{t + 1}_{j - 1/2}\right) \\ 
+      \phi_j^{t + 1} - \frac{\Delta t}{\Delta_j} \left(F^{t + 1}_{j + 1/2} - F^{t + 1}_{j - 1/2}\right) = \phi_j^t
+    \end{gather*}
+    При этом:
+    \begin{gather*}
+      F^{t + 1}_{j + 1/2} = \frac{1}{x_{j + 1} - x_j} \frac{1}{2 \nu} \left(x_{j + 1}(1 - x_{j + 1}) \phi^{t + 1}_{j + 1} - x_j(1 - x_j) \phi^{t + 1}_j\right) 
+      - \frac{\gamma}{2}\frac{(x_j + x_{j + 1})}{2} \left(1 - \frac{x_j + x_{j + 1}}{2}\right) (\phi_j^{t + 1} + \phi_{j + 1}^{t + 1})
+      \\
+      F^{t + 1}_{j - 1/2} = \frac{1}{x_{j} - x_{j - 1}} \frac{1}{2 \nu} \left(x_{j}(1 - x_{j}) \phi^{t + 1}_{j} - x_{j - 1}(1 - x_{j - 1}) \phi^{t + 1}_{j - 1}\right) 
+      - \frac{\gamma}{2}\frac{(x_{j - 1} + x_{j})}{2} \left(1 - \frac{x_{j - 1} + x_{j}}{2}\right) (\phi_{j - 1}^{t + 1} + \phi_{j}^{t + 1})
+    \end{gather*}
+    Распишем их разницу в удобном формате:
+    \begin{align*}
+      F_{j + 1/2}^{t + 1} - F_{j - 1/2}^{t + 1} 
+      &= \phi_{j - 1}^{t + 1} \left(\frac{x_{j - 1}(1 - x_{j - 1})}{2\nu(x_j - x_{j - 1})} 
+      + \frac{\gamma}{2} \frac{x_{j - 1} + x_j}{2}\left(1 - \frac{x_{j - 1} + x_j}{2}\right)\right)
+      \\
+      &+ \phi_{j}^{t + 1} \left( -\frac{x_j(1 - x_j)}{2\nu}\left(\frac{1}{x_{j + 1} - x_j} + \frac{1}{x_j - x_{j - 1}} \right) \right)
+      \\
+      &+ \phi_{j}^{t + 1}\left(\frac{\gamma}{2}\frac{x_{j - 1} + x_j}{2}\left(1 - \frac{x_{j - 1} + x_j}{2}\right) 
+                             - \frac{\gamma}{2}\frac{x_j + x_{j + 1}}{2}\left(1 - \frac{x_j + x_{j + 1}}{2}\right)\right)
+      \\
+      &+ \phi_{j + 1}^{t + 1} \left(\frac{x_{j + 1}(1 - x_{j +1})}{2\nu(x_{j + 1} - x_j)} 
+      - \frac{\gamma}{2}\frac{x_j + x_{j + 1}}{2} \left(1 - \frac{x_j + x_{j + 1}}{2}\right) \right)
+    \end{align*}
+    Тогда, домножив это на $-\frac{\Delta t}{\Delta_j}$ и добавив $1$ к коэффициенту при $\phi_j^{t + 1}$ мы получаем следующие коэффициенты в
+    трехдиагональной марице:
+    \begin{gather*}
+      \boxed{a_j} = -\frac{\Delta t}{\Delta_j}\left(\frac{x_{j - 1}(1 - x_{j - 1})}{2\nu(x_j - x_{j - 1})} 
+      + \frac{\gamma}{2} \frac{x_{j - 1} + x_j}{2}\left(1 - \frac{x_{j - 1} + x_j}{2}\right)\right) \\
+      \boxed{b_j} = 1 + \frac{\Delta t}{\Delta_j} \left( \frac{x_j(1 - x_j)}{2\nu}\frac{\Delta_j}{(x_{j + 1} - x_j)(x_j - x_{j - 1})} 
+      -\frac{\gamma}{2}\frac{x_{j - 1} + x_j}{2}\left(1 - \frac{x_{j - 1} + x_j}{2}\right) 
+                             + \frac{\gamma}{2}\frac{x_j + x_{j + 1}}{2}\left(1 - \frac{x_j + x_{j + 1}}{2}\right) \right) \\
+      \boxed{c_j} = \frac{\Delta t}{\Delta_j} \left(\frac{\gamma}{2}\frac{x_j + x_{j + 1}}{2} \left(1 - \frac{x_j + x_{j + 1}}{2}\right) 
+      - \frac{x_{j + 1}(1 - x_{j +1})}{2\nu(x_{j + 1} - x_j)} \right)
+    \end{gather*}
+    Производные коэффициентов по $\theta$ очевидны. Все формулы совпадают с исходным кодом $\partial a \partial i$.
+
+    В граничных точках получается следующая ситуация: $a_0 = c_G = 0$. При это $c_0$ и $a_G$ совпадают с формулами выше. Осталось посмотреть на код и понять 
+    что происходит с коэффициентами $b$:
+    \begin{gather*}
+      b_0 = 1 + \frac{\Delta t}{\Delta_j} \left(\frac{x_0 (1 - x_0)}{2\nu(x_1 - x_0)} + \frac{\gamma}{2} \frac{x_0 + x_1}{2} \left(1 - \frac{x_0 + x_1}{2}\right) \right) \\
+      b_G = 1 + \frac{\Delta t}{\Delta_j} \left(\frac{x_G(1 - x_G)}{2\nu (x_G - x_{G - 1})} - \frac{\gamma}{2} \frac{x_{G - 1} + x_G}{2} \left(1 - \frac{x_{G - 1} + x_G}{2} \right)  \right)
+      + \frac{\Delta t}{\Delta_j} \left(\frac{1}{\nu} + \gamma \cdot x_G \cdot (1 - x_G) \right)
+    \end{gather*}
+    %Тогда легко видеть, что в равенстве вида $a_j \phi^{t + 1}_{j - 1} + b_j \phi^{t + 1}_j + c_j \phi^{t + 1}_{j + 1} = \phi^t_j$ будут следующие коэффициенты:
+    %\begin{gather*}
+    %  a_j = - \frac{1}{2}\frac{\Delta t}{\Delta_j} \frac{x_{j - 1}(1 - x_{j - 1})}{x_j - x_{j - 1}} \\
+    %  b_j = \frac{x_j(1 - x_j)}{2}\frac{\Delta t}{\Delta_j}\left(\frac{1}{x_{j + 1} - x_j} + \frac{1}{x_j - x_{j - 1}}\right) 
+    %  = \frac{x_j(1 - x_j)\Delta t}{(x_{j + 1} - x_j)(x_j - x_{j - 1})} \\
+    %  c_j = 1 - \frac{1}{2} \frac{\Delta t}{\Delta_j} \frac{x_{j + 1}(1 - x_{j + 1})}{x_{j + 1} - x_j}
+    %\end{gather*}
+
+    Производная будет считаться следующим образом:
+    \begin{equation*}
+      \frac{\mathrm{d} \phi^{t + 1}}{\mathrm{d} \theta} = \frac{\mathrm{d}A^{-1}}{\mathrm{d}\theta} (\phi^t + C) + A^{-1} \left(\frac{\mathrm{d}\phi^t}{\mathrm{d} \theta} + \frac{\mathrm{d} C}{\mathrm{d} \theta} \right)
+    \end{equation*}
+  \end{itemize}
+
+\end{itemize}
+\end{document}
