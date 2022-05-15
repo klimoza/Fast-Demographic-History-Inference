@@ -115,16 +115,20 @@ Demographic History Inference, весна 2021/22}
 Таким образом наш вектор $\lambda$ это просто решение понятной системы уравнений. Теперь нам нужно посчитать три производные:
 
 \begin{itemize}
-  \item $\boxed{\frac{\partial h}{\partial \theta}}$
+  \item $\boxed{\frac{\partial h}{\partial \phi}}$
 
   Считать градиент от $n + 1$  произведения не очень хочется, так как производная произведения это не
   произведение производных и там все очень страшно разрастается.
 
   Тогда можем заметить, что у функции и логарифма одинаковые промежутки монотонности, следовательно можно найти градиент логарифма и это будет то что нам нужно.
-  Тогда получаем следующее равенство:
+  Не забываем о том, что весь аллель-частотный спектр нормируется. Обозначим: $\mathcal{A} = \sum_{i = 0}^N S[i],\; \mathcal{B} = \sum_{i = 0}^N M[i]$. Тогда:
   \begin{gather*}
-    \frac{\mathrm{d} \log h}{\mathrm{d} \phi} = \sum_{i = 0}^{n} 
-    \frac{\mathrm{d} M[i]}{\mathrm{d} \phi} \cdot \left(\frac{S[i]}{M[i]} - 1\right)
+    \frac{\mathrm{d} \log h}{\mathrm{d} \phi} = \sum_{i = 0}^N -\mathcal{A} \cdot \frac{\mathrm{d}}{\mathrm{d}\phi} \frac{M[i]}{\mathcal{B}} + 
+    S[i] \cdot \frac{\mathrm{d} \log M[i]}{\mathrm{d} \phi} - S[i] \cdot \frac{\mathrm{d}\mathcal{B}}{\mathrm{d}\phi} = \\ =
+    \sum_{i = 0}^N -\frac{\mathcal{A}}{\mathcal{B}^2} \left(\mathcal{B} \frac{\mathrm{d} M[i]}{\mathrm{d} \phi} - M[i] \frac{\mathrm{d} \mathcal{B}}{\mathrm{d}\phi} \right) +
+    \frac{S[i]}{M[i]} \frac{\mathrm{d}M[i]}{\mathrm{d}\phi} - S[i] \frac{\mathrm{d} \mathcal{B}}{\mathrm{d}\phi}
+    % \frac{\mathrm{d} \log h}{\mathrm{d} \phi} = \sum_{i = 0}^{n} 
+    % \frac{\mathrm{d} M[i]}{\mathrm{d} \phi} \cdot \left(\frac{S[i]}{M[i]} - 1\right)
   \end{gather*}
   
   Свели задачу к нахождению $\frac{\mathrm{d} M[i]}{\mathrm{d} \phi}$ при фиксированном  $i$. Следующим шагом проталкиваем градиент внутрь $M$:

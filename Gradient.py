@@ -1,6 +1,7 @@
 import numpy
 import sys
-from dadi import Integration, Numerics, tridiag, Spectrum, PhiManip
+from dadi import Integration, Numerics, tridiag, Spectrum, PhiManip, Inference
+
 
 # sys.path.append('demographic_inference_data/1_AraTha_4_Hub')
 # import demographic_model_dadi
@@ -48,13 +49,35 @@ def make_matrix(a, b, c):
         if i:
             A[i][i - 1] = a[i]
         A[i][i] = b[i]
-        if i + 1 < a.size:
+        if i + 1 < n:
             A[i][i + 1] = a[i]
     return A
 
 
 def inverse(a, b, c):
     return tridiag_inverse(make_matrix(a, b, c))
+
+
+def tens_mult(A, B):
+    n1 = A.shape[0]
+    n2 = B.shape[0]
+    n3 = B.shape[1]
+    C = numpy.zeros((n1, n3, 3))
+    for i in range(0, n1):
+        for j in range(0, n2):
+            for k in range(0, n3):
+                C[i][k] += A[i][j] * B[j][k]
+    return C
+
+
+def tens_vec_mult(A, b):
+    n1 = A.shape[0]
+    n2 = b.shape[0]
+    C = numpy.zeros((n1, 3))
+    for i in range(0, n1):
+        for j in range(0, n2):
+            C[i] += A[i][j] * b[j]
+    return C
 
 
 def find_gradient_one_pop(phi, xx, dphi, T, nu=1, gamma=0, h=0.5, theta0=1, initial_t=0, beta=1):
@@ -111,22 +134,22 @@ def find_gradient_one_pop(phi, xx, dphi, T, nu=1, gamma=0, h=0.5, theta0=1, init
 
         inv_A = inverse(this_dt * a, 1 + this_dt * b, this_dt * c)
         if current_t + this_dt != T:
-            dphi = inv_A * dphi
+            dphi = inv_A.dot(dphi)
         else:
             phi_tmp = dphi
-            Integration._inject_mutations_1D(phi_tmp[:][-1], 1, xx, theta0)
-            dphi = inv_A * (dphi + phi_tmp)
+            Integration._inject_mutations_1D(phi_tmp[:, -1], 1, xx, theta0)
+            dphi = inv_A.dot(dphi + phi_tmp)
 
         Integration._inject_mutations_1D(phi, this_dt, xx, theta0)
 
         if current_t + this_dt != T:
-            dinv = - dt * inv_A * dA * inv_A
-            dphi += dinv * phi
+            dinv = - dt * tens_mult(tens_mult(inv_A, dA), inv_A)
+            dphi += tens_vec_mult(dinv, phi)
         else:
             dA = dt * dA
-            dA[:][:][-1] = A
-            dinv = - inv_A * dA * inv_A
-            dphi += dinv * phi
+            dA[:, :, -1] = A
+            dinv = -tens_mult(tens_mult(inv_A, dA), inv_A)
+            dphi += tens_vec_mult(dinv, phi)
 
         r = phi / this_dt
         phi = tridiag.tridiag(a, b + 1 / this_dt, c, r)
@@ -135,7 +158,7 @@ def find_gradient_one_pop(phi, xx, dphi, T, nu=1, gamma=0, h=0.5, theta0=1, init
 
 
 def findCellGradient(xx, i):
-    n = xx.size()
+    n = len(xx)
     res = 0
     for k in range(n - 1):
         res += (xx[k + 1] - xx[k]) * (
@@ -143,14 +166,26 @@ def findCellGradient(xx, i):
     return Numerics.multinomln([n, i]) * res
 
 
-def findLikelihoodGradient(phi, dphi, xx, expctd, res):
-    n = xx.size()
+def findLikelihoodGradient(phi, dphi, xx, S, M):
+    n = len(M)
     dM = numpy.zeros(n)
+    A = 0
+    B = 0
+    dB = 0
 
     for i in range(n):
-        dM[i] = findCellGradient(xx, i) * (expctd[i] / res[i] - 1)
+        dM[i] = findCellGradient(xx, i)
+        dB += dM[i]
+        B += M.data[i]
+        A += S.data[i]
+    print(dM)
+    dH = numpy.zeros(len(xx))
+    for i in range(n):
+        dH += -A * (B * dM[i] - M.data[i] * dB) / (B ** 2) + S.data[i] * dM[i] / M.data[i] - S.data[i] * B
 
-    return dM.dot(dphi)
+    print("A: ", A)
+    print("dH: ", dH)
+    return dH.dot(dphi)
 
 
 eps = 1e-8
@@ -201,33 +236,52 @@ def testInverse():
 
 
 # 1_AraTha_4_Hub/demographic_model_dadi.py
-def model_func(params, expctd, ns, pts):
-    """
-    Three epoch model from Huber et al., 2018.
-    First epoch is ancestral.
-
-    :param N1: Size of population during second epoch.
-    :param T1: Time of second epoch.
-    :param N2: Size of population during third epoch.
-    :param T2: Time of third epoch.
-    """
-    N1, T1, N2, T2 = params
+def model_func(params, ns, pts):
+    N1, T1, G = params
 
     xx = Numerics.default_grid(pts)
     phi = PhiManip.phi_1D(xx)
 
-    dphi = find_gradient_one_pop(phi, xx, numpy.zeros((xx.size, 3)), T1, nu=N1)
-    phi = Integration.one_pop(phi, xx, T1, nu=N1)
+    phi = Integration.one_pop(phi, xx, T1, nu=N1, gamma=G)
+    # phi = Integration.one_pop(phi, xx, T2, nu=N2)
 
-    dphi = find_gradient_one_pop(phi, xx, dphi, T2, nu=N2)
-    phi = Integration.one_pop(phi, xx, T2, nu=N2)
+    fs = Spectrum.from_phi(phi, [ns], [xx])
+    return fs
 
-    fs = Spectrum.from_phi(phi, ns, [xx])
-    return fs, findLikelihoodGradient(phi, dphi, xx, expctd, fs)
 
-def testGradient_AraTha(N1, T1, N2, T2):
-    expctd = Spectrum.from_file("demographic_inference_data/1_AraTha_4_Hub/fs_data.fs")
-    res, gradient = model_func((N1, T1, N2, T2), expctd, 16, [40, 50, 60])
+# 1_AraTha_4_Hub/demographic_model_dadi.py
+def model_grad(params, S, ns, pts):
+    N1, T1, G = params
+
+    xx = Numerics.default_grid(pts)
+    phi = PhiManip.phi_1D(xx)
+
+    dphi = find_gradient_one_pop(phi, xx, numpy.zeros((xx.size, 3)), T1, nu=N1, gamma=G)
+    phi = Integration.one_pop(phi, xx, T1, nu=N1, gamma=G)
+
+    # dphi = find_gradient_one_pop(phi, xx, dphi, T2, nu=N2)
+    # phi = Integration.one_pop(phi, xx, T2, nu=N2)
+    print(dphi)
+
+    fs = Spectrum.from_phi(phi, [ns], [xx])
+    return fs, findLikelihoodGradient(phi, dphi, xx, S, fs)
+
+
+def testGradient_AraTha(N1, T1):
+    S = Spectrum.from_file("data/1_AraTha_4_Hub/fs_data.fs")
+    M, gradient = model_grad((N1, T1, 0), S, 16, 40)
+    ll = Inference.ll(M, S)
+    # print(S.data)
+    # print(M.data)
+    print(gradient)
+    llx = Inference.ll(model_func((N1 + eps, T1, 0), 16, 40), S)
+    lly = Inference.ll(model_func((N1, T1 + eps, 0), 16, 40), S)
+    llz = Inference.ll(model_func((N1, T1, eps), 16, 40), S)
+    print(ll, llx, lly, llz)
+    grad = [(llx - ll) / eps, (lly - ll) / eps, (llz - ll) / eps]
+    print(grad)
+
 
 if __name__ == "__main__":
     testInverse()
+    testGradient_AraTha(0.149, 0.023)
