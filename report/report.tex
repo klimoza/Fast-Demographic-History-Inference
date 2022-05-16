@@ -124,7 +124,7 @@ Demographic History Inference, весна 2021/22}
   Не забываем о том, что весь аллель-частотный спектр нормируется. Обозначим: $\mathcal{A} = \sum_{i = 0}^N S[i],\; \mathcal{B} = \sum_{i = 0}^N M[i]$. Тогда:
   \begin{gather*}
     \frac{\mathrm{d} \log h}{\mathrm{d} \phi} = \sum_{i = 0}^N -\mathcal{A} \cdot \frac{\mathrm{d}}{\mathrm{d}\phi} \frac{M[i]}{\mathcal{B}} + 
-    S[i] \cdot \frac{\mathrm{d} \log M[i]}{\mathrm{d} \phi} - S[i] \cdot \frac{\mathrm{d}\mathcal{B}}{\mathrm{d}\phi} = \\ =
+    S[i] \cdot \frac{\mathrm{d} \log M[i]}{\mathrm{d} \phi} - S[i] \cdot \frac{\mathrm{d}\log \mathcal{B}}{\mathrm{d}\phi} = \\ =
     \sum_{i = 0}^N -\frac{\mathcal{A}}{\mathcal{B}^2} \left(\mathcal{B} \frac{\mathrm{d} M[i]}{\mathrm{d} \phi} - M[i] \frac{\mathrm{d} \mathcal{B}}{\mathrm{d}\phi} \right) +
     \frac{S[i]}{M[i]} \frac{\mathrm{d}M[i]}{\mathrm{d}\phi} - S[i] \frac{\mathrm{d} \mathcal{B}}{\mathrm{d}\phi}
     % \frac{\mathrm{d} \log h}{\mathrm{d} \phi} = \sum_{i = 0}^{n} 

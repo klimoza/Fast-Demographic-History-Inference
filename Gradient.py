@@ -128,30 +128,35 @@ def give_me_everything(phi, xx, T, nu=1, gamma=0, h=0.5, theta0=1, initial_t=0, 
 
     A = make_matrix(a, b, c)
     dt = Integration._compute_dt(dx, nu, [0], gamma, h)
+    # dt = 1
     return a, b, c, A, dA, dt
 
 
 def find_gradient_one_pop(phi, xx, dphi, T, nu=1, gamma=0, h=0.5, theta0=1, initial_t=0, beta=1):
     a, b, c, A, dA, dt = give_me_everything(phi, xx, T, nu, gamma, h, theta0, initial_t, beta)
     current_t = initial_t
+    inv_A = inverse(dt * a, 1 + dt * b, dt * c)
     while current_t < T:
         this_dt = min(dt, T - current_t)
 
-        inv_A = inverse(this_dt * a, 1 + this_dt * b, this_dt * c)
         if current_t + this_dt != T:
             dphi = inv_A.dot(dphi)
         else:
-            phi_tmp = dphi
-            phi_tmp[:, -1] = Integration._inject_mutations_1D(phi_tmp[:, -1], 1, xx, theta0)
-            dphi = inv_A.dot(dphi + phi_tmp)
+            inv_A = inverse(this_dt * a, 1 + this_dt * b, this_dt * c)
+            dphi[1][-1] += 1 / xx[1] * theta0 / 2 * 2 / (xx[2] - xx[0])
+            # phi_tmp = dphi
+            # phi_tmp[1][-1] += 1 / xx[1] * theta0 / 2 * 2 / (xx[2] - xx[0])
+            # phi_tmp[:, -1] = Integration._inject_mutations_1D(phi_tmp[:, -1], 1, xx, theta0)
+            dphi = inv_A.dot(dphi)
 
-        phi = Integration._inject_mutations_1D(phi, this_dt, xx, theta0)
+        phi[1] += this_dt / xx[1] * theta0 / 2 * 2 / (xx[2] - xx[0])
+        # phi = Integration._inject_mutations_1D(phi, this_dt, xx, theta0)
 
         if current_t + this_dt != T:
-            dinv = - dt * tens_mult(tens_mult(inv_A, dA), inv_A)
+            dinv = - this_dt * tens_mult(tens_mult(inv_A, dA), inv_A)
             dphi += tens_vec_mult(dinv, phi)
         else:
-            dA = dt * dA
+            dA = this_dt * dA
             dA[:, :, -1] = A
             dinv = -tens_mult(tens_mult(inv_A, dA), inv_A)
             dphi += tens_vec_mult(dinv, phi)
@@ -159,7 +164,7 @@ def find_gradient_one_pop(phi, xx, dphi, T, nu=1, gamma=0, h=0.5, theta0=1, init
         r = phi / this_dt
         phi = tridiag.tridiag(a, b + 1 / this_dt, c, r)
         current_t += this_dt
-    return dphi
+    return dphi, phi
 
 
 def findCellGradient(xx, i):
@@ -167,8 +172,8 @@ def findCellGradient(xx, i):
     res = 0
     for k in range(n - 1):
         res += (xx[k + 1] - xx[k]) * (
-                (xx[k] ** i) * (1 - xx[k]) ** (n - i) + (xx[k + 1] ** i) * (1 - xx[k + 1]) ** (n - i))
-    return Numerics.multinomln([n, i]) * res
+                (xx[k] ** i) * (1 - xx[k]) ** (n - i - 1) + (xx[k + 1] ** i) * (1 - xx[k + 1]) ** (n - i - 1))
+    return Numerics.comb(n, i) * res
 
 
 def findLikelihoodGradient(phi, dphi, xx, S, M):
@@ -186,14 +191,15 @@ def findLikelihoodGradient(phi, dphi, xx, S, M):
     # print(dM)
     dH = numpy.zeros(len(xx))
     for i in range(n):
-        dH += -A * (B * dM[i] - M.data[i] * dB) / (B ** 2) + S.data[i] * dM[i] / M.data[i] - S.data[i] * B
+        # dH += -A * (B * dM[i] - M.data[i] * dB) / (B ** 2) + S.data[i] * dM[i] / M.data[i] - S.data[i] * B
+        dH += dM[i] * (S[i] / M[i] - 1)
 
     # print("A: ", A)
     # print("dH: ", dH)
     return dH.dot(dphi)
 
 
-eps = 1e-8
+eps = 1e-10
 
 
 def isId(A):
@@ -247,10 +253,11 @@ def model_func(params, ns, pts):
     xx = Numerics.default_grid(pts)
     phi = PhiManip.phi_1D(xx)
 
-    phi = Integration.one_pop(phi, xx, T1, nu=N1, gamma=G)
+    # phi = Integration.one_pop(phi, xx, T1, nu=N1, gamma=G)
+    dphi, phi = find_gradient_one_pop(phi, xx, numpy.zeros((xx.size, 3)), T1, nu=N1, gamma=G)
     # phi = Integration.one_pop(phi, xx, T2, nu=N2)
-
-    fs = Spectrum.from_phi(phi, [ns], [xx])
+    # print(phi)
+    fs = Spectrum.from_phi(phi, [ns], [xx], force_direct=True)
     return phi, fs
 
 
@@ -261,14 +268,14 @@ def model_grad(params, S, ns, pts):
     xx = Numerics.default_grid(pts)
     phi = PhiManip.phi_1D(xx)
 
-    dphi = find_gradient_one_pop(phi, xx, numpy.zeros((xx.size, 3)), T1, nu=N1, gamma=G)
-    phi = Integration.one_pop(phi, xx, T1, nu=N1, gamma=G)
+    dphi, phi = find_gradient_one_pop(phi, xx, numpy.zeros((xx.size, 3)), T1, nu=N1, gamma=G)
+    # phi = Integration.one_pop(phi, xx, T1, nu=N1, gamma=G)
 
     # dphi = find_gradient_one_pop(phi, xx, dphi, T2, nu=N2)
     # phi = Integration.one_pop(phi, xx, T2, nu=N2)
-    print("dphi: ", dphi)
-
-    fs = Spectrum.from_phi(phi, [ns], [xx])
+    # print("dphi: ", dphi)
+    # print("kek: ", phi)
+    fs = Spectrum.from_phi(phi, [ns], [xx], force_direct=True)
     return phi, fs, findLikelihoodGradient(phi, dphi, xx, S, fs)
 
 
@@ -307,22 +314,21 @@ def testGradient_AraTha(N1, T1):
     ll = Inference.ll(M, S)
     # print(S.data)
     # print(M.data)
-    # print(gradient)
+    print(gradient)
+    print(M.data)
     phix, Mx = model_func((N1 + eps, T1, 0), 16, 40)
-    phiy, Mz = model_func((N1, T1, eps), 16, 40)
-    phiz, My = model_func((N1, T1 + eps, 0), 16, 40)
+    print(Mx.data)
+    phiy, My = model_func((N1, T1, eps), 16, 40)
+    print(My.data)
+    phiz, Mz = model_func((N1, T1 + eps, 0), 16, 40)
+    print(Mz.data)
     llx = Inference.ll(Mx, S)
     lly = Inference.ll(My, S)
     llz = Inference.ll(Mz, S)
-    gr = numpy.zeros((phix.size, 3))
-    for i in range(0, gr.shape[0]):
-        gr[i][0] = (phix[i] - phi[i]) / eps
-        gr[i][1] = (phiy[i] - phi[i]) / eps
-        gr[i][2] = (phiz[i] - phi[i]) / eps
-    print("d_gr: ", gr)
-    # print(ll, llx, lly, llz)
+    # print("d_gr: ", gr)
+    print(ll, llx, lly, llz)
     grad = [(llx - ll) / eps, (lly - ll) / eps, (llz - ll) / eps]
-    # print(grad)
+    print(grad)
 
 
 if __name__ == "__main__":
