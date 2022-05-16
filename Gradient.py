@@ -50,7 +50,7 @@ def make_matrix(a, b, c):
             A[i][i - 1] = a[i]
         A[i][i] = b[i]
         if i + 1 < n:
-            A[i][i + 1] = a[i]
+            A[i][i + 1] = c[i]
     return A
 
 
@@ -80,7 +80,7 @@ def tens_vec_mult(A, b):
     return C
 
 
-def find_gradient_one_pop(phi, xx, dphi, T, nu=1, gamma=0, h=0.5, theta0=1, initial_t=0, beta=1):
+def give_me_everything(phi, xx, T, nu=1, gamma=0, h=0.5, theta0=1, initial_t=0, beta=1):
     M = Integration._Mfunc1D(xx, gamma, h)
     MInt = Integration._Mfunc1D((xx[:-1] + xx[1:]) / 2, gamma, h)
     V = Integration._Vfunc(xx, nu, beta=beta)
@@ -102,7 +102,7 @@ def find_gradient_one_pop(phi, xx, dphi, T, nu=1, gamma=0, h=0.5, theta0=1, init
     c = numpy.zeros(n)
     c[:-1] += -dfactor[:-1] * (-MInt * (1 - delj) + V[1:] / (2 * dx))
     for i in range(0, n - 1):
-        dA[i][i + 1][0] += dfactor[i] * xx[i + 1] * (1 - xx[i + 1]) / (2 * dx[i]) / (nu ** 2)
+        dA[i][i + 1][0] += dfactor[i] * xx[i + 1] * (1 - xx[i + 1]) / (2 * dx[i] * nu * nu)
         dA[i][i + 1][1] += dfactor[i] * (1 / 2) * ((xx[i] + xx[i + 1]) / 2) * (1 - (xx[i] + xx[i + 1]) / 2)
 
     b = numpy.zeros(n)
@@ -113,21 +113,26 @@ def find_gradient_one_pop(phi, xx, dphi, T, nu=1, gamma=0, h=0.5, theta0=1, init
 
     b[1:] += dfactor[1:] * (-MInt * (1 - delj) + V[1:] / (2 * dx))
     for i in range(1, n):
-        dA[i][i][0] += -dfactor[i] * xx[i] * (1 - xx[i]) / (2 * dx[i - 1]) / (nu ** 2)
+        dA[i][i][0] += -dfactor[i] * xx[i] * (1 - xx[i]) / (2 * dx[i - 1] * nu * nu)
         dA[i][i][1] += -dfactor[i] * (1 / 2) * ((xx[i - 1] + xx[i]) / 2) * (1 - (xx[i - 1] + xx[i]) / 2)
 
     if M[0] <= 0:
         b[0] += (0.5 / nu - M[0]) * 2 / dx[0]
-        dA[0][0][0] -= dfactor[0] / (2 * nu * nu)
-        dA[0][0][1] -= dfactor[0] * xx[0] * (1 - xx[0])
+        dA[0][0][0] += -1 / (nu * nu * dx[0])
+        dA[0][0][1] += -2 * xx[0] * (1 - xx[0]) / (dx[0])
 
     if M[-1] >= 0:
         b[-1] += -(-0.5 / nu - M[-1]) * 2 / dx[-1]
-        dA[-1][-1][0] -= dfactor[-1] / (2 * nu * nu)
-        dA[-1][-1][1] += dfactor[-1] * xx[-1] * (1 - xx[-1])
+        dA[-1][-1][0] += -1 / (nu * nu * dx[-1])
+        dA[-1][-1][1] += 2 * xx[-1] * (1 - xx[-1]) / dx[-1]
 
     A = make_matrix(a, b, c)
     dt = Integration._compute_dt(dx, nu, [0], gamma, h)
+    return a, b, c, A, dA, dt
+
+
+def find_gradient_one_pop(phi, xx, dphi, T, nu=1, gamma=0, h=0.5, theta0=1, initial_t=0, beta=1):
+    a, b, c, A, dA, dt = give_me_everything(phi, xx, T, nu, gamma, h, theta0, initial_t, beta)
     current_t = initial_t
     while current_t < T:
         this_dt = min(dt, T - current_t)
@@ -137,10 +142,10 @@ def find_gradient_one_pop(phi, xx, dphi, T, nu=1, gamma=0, h=0.5, theta0=1, init
             dphi = inv_A.dot(dphi)
         else:
             phi_tmp = dphi
-            Integration._inject_mutations_1D(phi_tmp[:, -1], 1, xx, theta0)
+            phi_tmp[:, -1] = Integration._inject_mutations_1D(phi_tmp[:, -1], 1, xx, theta0)
             dphi = inv_A.dot(dphi + phi_tmp)
 
-        Integration._inject_mutations_1D(phi, this_dt, xx, theta0)
+        phi = Integration._inject_mutations_1D(phi, this_dt, xx, theta0)
 
         if current_t + this_dt != T:
             dinv = - dt * tens_mult(tens_mult(inv_A, dA), inv_A)
@@ -178,13 +183,13 @@ def findLikelihoodGradient(phi, dphi, xx, S, M):
         dB += dM[i]
         B += M.data[i]
         A += S.data[i]
-    print(dM)
+    # print(dM)
     dH = numpy.zeros(len(xx))
     for i in range(n):
         dH += -A * (B * dM[i] - M.data[i] * dB) / (B ** 2) + S.data[i] * dM[i] / M.data[i] - S.data[i] * B
 
-    print("A: ", A)
-    print("dH: ", dH)
+    # print("A: ", A)
+    # print("dH: ", dH)
     return dH.dot(dphi)
 
 
@@ -246,7 +251,7 @@ def model_func(params, ns, pts):
     # phi = Integration.one_pop(phi, xx, T2, nu=N2)
 
     fs = Spectrum.from_phi(phi, [ns], [xx])
-    return fs
+    return phi, fs
 
 
 # 1_AraTha_4_Hub/demographic_model_dadi.py
@@ -261,27 +266,66 @@ def model_grad(params, S, ns, pts):
 
     # dphi = find_gradient_one_pop(phi, xx, dphi, T2, nu=N2)
     # phi = Integration.one_pop(phi, xx, T2, nu=N2)
-    print(dphi)
+    print("dphi: ", dphi)
 
     fs = Spectrum.from_phi(phi, [ns], [xx])
-    return fs, findLikelihoodGradient(phi, dphi, xx, S, fs)
+    return phi, fs, findLikelihoodGradient(phi, dphi, xx, S, fs)
+
+
+def testMatrixDerivative(params, pts):
+    N, T, G = params
+
+    xx = Numerics.default_grid(pts)
+    phi = PhiManip.phi_1D(xx)
+
+    a, b, c, A, dA, dt = give_me_everything(phi, xx, T, nu=N, gamma=G)
+    this_dt = T - T % dt
+    dA *= this_dt
+    dA[:, :, -1] = A
+    A = make_matrix(a * this_dt, 1 + b * this_dt, c * this_dt)
+    a, b, c, _, _, _ = give_me_everything(phi, xx, T + eps, N, G)
+    tmp_dt = (T + eps - T % dt)
+    Az = make_matrix(a * tmp_dt, 1 + b * tmp_dt, c * tmp_dt)
+    a, b, c, _, _, _ = give_me_everything(phi, xx, T, N + eps, G)
+    Ax = make_matrix(a * this_dt, 1 + b * this_dt, c * this_dt)
+    a, b, c, _, _, _ = give_me_everything(phi, xx, T, N, G + eps)
+    Ay = make_matrix(a * this_dt, 1 + b * this_dt, c * this_dt)
+
+    gr = numpy.zeros((len(xx), len(xx), 3))
+    for i in range(0, len(xx)):
+        for j in range(0, len(xx)):
+            gr[i][j][0] = (Ax[i, j] - A[i, j]) / eps
+            gr[i][j][1] = (Ay[i, j] - A[i, j]) / eps
+            gr[i][j][2] = (Az[i, j] - A[i, j]) / eps
+    print(dA - gr)
+    # print(gr)
 
 
 def testGradient_AraTha(N1, T1):
     S = Spectrum.from_file("data/1_AraTha_4_Hub/fs_data.fs")
-    M, gradient = model_grad((N1, T1, 0), S, 16, 40)
+    phi, M, gradient = model_grad((N1, T1, 0), S, 16, 40)
     ll = Inference.ll(M, S)
     # print(S.data)
     # print(M.data)
-    print(gradient)
-    llx = Inference.ll(model_func((N1 + eps, T1, 0), 16, 40), S)
-    lly = Inference.ll(model_func((N1, T1 + eps, 0), 16, 40), S)
-    llz = Inference.ll(model_func((N1, T1, eps), 16, 40), S)
-    print(ll, llx, lly, llz)
+    # print(gradient)
+    phix, Mx = model_func((N1 + eps, T1, 0), 16, 40)
+    phiy, Mz = model_func((N1, T1, eps), 16, 40)
+    phiz, My = model_func((N1, T1 + eps, 0), 16, 40)
+    llx = Inference.ll(Mx, S)
+    lly = Inference.ll(My, S)
+    llz = Inference.ll(Mz, S)
+    gr = numpy.zeros((phix.size, 3))
+    for i in range(0, gr.shape[0]):
+        gr[i][0] = (phix[i] - phi[i]) / eps
+        gr[i][1] = (phiy[i] - phi[i]) / eps
+        gr[i][2] = (phiz[i] - phi[i]) / eps
+    print("d_gr: ", gr)
+    # print(ll, llx, lly, llz)
     grad = [(llx - ll) / eps, (lly - ll) / eps, (llz - ll) / eps]
-    print(grad)
+    # print(grad)
 
 
 if __name__ == "__main__":
     testInverse()
+    # testMatrixDerivative((0.149, 0.023, 0), 40)
     testGradient_AraTha(0.149, 0.023)
