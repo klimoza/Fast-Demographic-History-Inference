@@ -214,10 +214,10 @@ def findCellGradient(xx, ns):
     """
     res = numpy.zeros((ns + 1, len(xx)))
     for i in range(ns + 1):
-        res[i][0] = comb_fun(ns, i, (xx[1] - xx[0]) / 2)
+        res[i][0] = comb_fun(ns, i, xx[0]) * (xx[1] - xx[0])
         for j in range(1, len(xx) - 1):
-            res[i][j] = comb_fun(ns, i, (xx[j + 1] - xx[j - 1]) / 2)
-        res[i][-1] = comb_fun(ns, i, (xx[-1] - xx[-2]) / 2)
+            res[i][j] = comb_fun(ns, i, xx[j]) * (xx[j + 1] - xx[j - 1]) / 2
+        res[i][-1] = comb_fun(ns, i, xx[-1]) * (xx[-1] - xx[-2]) / 2
     return res
 
 
@@ -236,7 +236,7 @@ def findLLdPhi(xx, M, S, ns):
     dH = numpy.zeros(len(xx))
     for i in range(ns + 1):
         # dH += -A * (B * dM[i] - M.data[i] * dB) / (B ** 2) + S.data[i] * dM[i] / M.data[i] - S.data[i] * B
-        sum_der[i] = dM[i] * (S[i] / M[i] - 1)
+        sum_der[i] = dM[i] * (S.data[i] / M.data[i] - 1)
         dH += sum_der[i]
     # Результат лежит в dH, в sum_der лежат производные по каждому слагаемому. Полезно для отладки.
     return dH, sum_der
@@ -317,13 +317,12 @@ def model_grad(params, S, ns, pts):
     Сразу возвращаем и градиент, потому что удобно.
     !! force_direct=True, так как это простой случай и заставить бы хотя бы его работать !!
     """
-    N1, T1, G = params
+    N1, T1, G1 = params
 
     xx = Numerics.default_grid(pts)
     phi = PhiManip.phi_1D(xx)
 
-    dphi, phi = find_gradient_one_pop(phi, xx, numpy.zeros((xx.size, 3)), T1, nu=N1, gamma=G)
-    # dphi = find_gradient_one_pop(phi, xx, dphi, T2, nu=N2)
+    dphi, phi = find_gradient_one_pop(phi, xx, numpy.zeros((xx.size, 3)), T1, nu=N1, gamma=G1)
 
     fs = Spectrum.from_phi(phi, [ns], [xx], force_direct=True)
     return phi, fs, findLikelihoodGradient(phi, dphi, xx, fs, S, ns)
@@ -362,7 +361,7 @@ def testMatrixDerivative(params):
             gr[i][j][1] = (Ay[i, j] - A[i, j]) / eps
             gr[i][j][2] = (Az[i, j] - A[i, j]) / eps
     # Now we need somehow compare gr and dA. It isn't necessary though, if you don't need to test anything.
-    # print(dA - gr)
+    print(dA - gr)
 
 
 def testCell(params):
@@ -373,7 +372,7 @@ def testCell(params):
     N, T, G = params
     S = Spectrum.from_file("data/1_AraTha_4_Hub/fs_data.fs")
     xx = Numerics.default_grid(pts)
-    phi, M, gradient = model_grad((N, T, G), S, ns, pts)
+    phi, M, _ = model_grad((N, T, G), S, ns, pts)
     cell = findCellGradient(xx, ns)
 
     man = numpy.zeros((ns + 1, pts))
@@ -382,7 +381,7 @@ def testCell(params):
         man[:, i] = (Spectrum._from_phi_1D_direct(ns, xx, phi).data - M.data) / eps
         phi[i] -= eps
 
-    # print(cell - man)
+    print(cell - man)
 
 
 def testDmDphi(params):
@@ -401,6 +400,9 @@ def testDmDphi(params):
     grDhDphi = numpy.zeros(pts)  # dHdPhi
     grDh = numpy.zeros((ns + 1, pts))  # Terms
 
+    dM = findCellGradient(xx, ns)
+    grM = Inference.ll_per_bin(M, S)
+
     for i in range(pts):
         phi[i] += eps
 
@@ -408,11 +410,10 @@ def testDmDphi(params):
         tmpV = Inference.ll_per_bin(tmpM, S)
 
         grDhDphi[i] = (tmpV.sum() - ll) / eps
-        grDh[:, i] = (tmpV.data - M.data) / eps
+        grDh[:, i] = (tmpV.data - grM) / eps
 
         phi[i] -= eps
 
-    print(dHdPhi - grDhDphi)
     print(dH - grDh)
 
 
@@ -438,5 +439,5 @@ def testGradient(params):
 
 
 if __name__ == "__main__":
-    params = (0.149, 0.023)
-    testGradient(params)
+    params = (0.149, 0.023, 0)
+    testDmDphi(params)
