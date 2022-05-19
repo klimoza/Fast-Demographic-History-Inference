@@ -99,6 +99,7 @@ def tens_vec_mult(A, b):
 eps = 1e-8
 ns = 16
 pts = 40
+filename = "data/1_AraTha_4_Hub/fs_data.fs"
 
 
 def give_me_everything(phi, xx, nu=1, gamma=0, h=0.5, beta=1):
@@ -225,37 +226,35 @@ def findLLdPhi(xx, M, S, ns):
     """
     Ищем производную d log H / d Phi => размерность должна быть 1 x G
     xx := точки
-    M := model
-    S := data
+    M := model.data
+    S := data.data
     ns := размер M - 1
     С нормированием пока что туго, поэтому пока что считаем что все считается честно.
     Тем не менее предполагаемая формула для общего случая закомментирована в цикле.
     """
     dM = findCellGradient(xx, ns)
-    sum_der = numpy.zeros((ns + 1, len(xx)))
+    result = numpy.zeros((ns + 1, len(xx)))
     dH = numpy.zeros(len(xx))
+
+    A = S.sum()
+    B = M.sum()
+    dB = numpy.zeros(len(xx))
+
     for i in range(ns + 1):
-        # dH += -A * (B * dM[i] - M.data[i] * dB) / (B ** 2) + S.data[i] * dM[i] / M.data[i] - S.data[i] * B
-        sum_der[i] = dM[i] * (S.data[i] / M.data[i] - 1)
-        dH += sum_der[i]
-    # Результат лежит в dH, в sum_der лежат производные по каждому слагаемому. Полезно для отладки.
-    return dH, sum_der
+        dB += dM[i]
+
+    for i in range(ns + 1):
+        # result[i] = -A * (B * dM[i] - M[i] * dB) / (B ** 2) + S[i] * dM[i] / M[i] - S[i] * dB / B
+        result[i] = dM[i] * (S[i] / M[i] - 1)
+        dH += result[i]
+    return dH, result, dB
 
 
 def findLikelihoodGradient(phi, dphi, xx, M, S, ns):
     """
     Считаем d log H / d Theta => размерность должна быть 1 x M
     """
-    dM = findCellGradient(xx, ns)
-    A = 0
-    B = 0
-    dB = 0
-
-    for i in range(ns):
-        dB += dM[i]
-        B += M.data[i]
-        A += S.data[i]
-    dH, _ = findLLdPhi(xx, M, S, ns)
+    dH, _, _ = findLLdPhi(xx, M, S, ns)
     return dH.dot(dphi)
 
 
@@ -310,7 +309,7 @@ def testInverse():
 
 
 # 1_AraTha_4_Hub/demographic_model_dadi.py
-def model_grad(params, S, ns, pts):
+def model_grad(params, S, ns, pts, grad=False):
     """
     Моделируем 1_AraTha_4_Hub, отбросив последнюю эпоху.
     Помимо полученного АЧС возвращаем еще и phi, так как удобно для отладки.
@@ -322,10 +321,18 @@ def model_grad(params, S, ns, pts):
     xx = Numerics.default_grid(pts)
     phi = PhiManip.phi_1D(xx)
 
-    dphi, phi = find_gradient_one_pop(phi, xx, numpy.zeros((xx.size, 3)), T1, nu=N1, gamma=G1)
+    dphi = numpy.zeros((len(xx), 3))
+    if grad:
+        dphi, phi = find_gradient_one_pop(phi, xx, numpy.zeros((len(xx), 3)), T1, nu=N1, gamma=G1)
+    else:
+        phi = Integration.one_pop(phi, xx, T1, N1, G1)
 
     fs = Spectrum.from_phi(phi, [ns], [xx], force_direct=True)
-    return phi, fs, findLikelihoodGradient(phi, dphi, xx, fs, S, ns)
+    # fs *= 40
+    if grad:
+        return phi, fs, findLikelihoodGradient(phi, dphi, xx, fs, S, ns), dphi
+    else:
+        return phi, fs
 
 
 def testMatrixDerivative(params):
@@ -370,7 +377,7 @@ def testCell(params):
     Для полноценной работы нужно еще что-то дописать, но основная структура написана.
     """
     N, T, G = params
-    S = Spectrum.from_file("data/1_AraTha_4_Hub/fs_data.fs")
+    S = Spectrum.from_file(filename)
     xx = Numerics.default_grid(pts)
     phi, M, _ = model_grad((N, T, G), S, ns, pts)
     cell = findCellGradient(xx, ns)
@@ -378,7 +385,7 @@ def testCell(params):
     man = numpy.zeros((ns + 1, pts))
     for i in range(pts):
         phi[i] += eps
-        man[:, i] = (Spectrum._from_phi_1D_direct(ns, xx, phi).data - M.data) / eps
+        man[:, i] = (Spectrum.from_phi(phi, [ns], [xx]).data - M.data) / eps
         phi[i] -= eps
 
     print(cell - man)
@@ -391,44 +398,64 @@ def testDmDphi(params):
     Можем сравнивать как всю сумму(1 x G), так и каждое слагаемое по отдельности(N x G).
     """
     N, T, G = params
-    S = Spectrum.from_file("data/1_AraTha_4_Hub/fs_data.fs")
+    S = Spectrum.from_file(filename)
     xx = Numerics.default_grid(pts)
     phi, M, gradient = model_grad((N, T, G), S, ns, pts)
-    ll = Inference.ll(M, S)
-    dHdPhi, dH = findLLdPhi(xx, M, S, ns)
+    dHdPhi, dH, dB = findLLdPhi(xx, M.data, S.data, ns)
 
     grDhDphi = numpy.zeros(pts)  # dHdPhi
     grDh = numpy.zeros((ns + 1, pts))  # Terms
 
-    dM = findCellGradient(xx, ns)
-    grM = Inference.ll_per_bin(M, S)
+    grM = Inference.ll_per_bin(M, S).data
 
     for i in range(pts):
         phi[i] += eps
 
         tmpM = Spectrum.from_phi(phi, [ns], [xx], force_direct=True)
-        tmpV = Inference.ll_per_bin(tmpM, S)
+        tmpV = Inference.ll_per_bin(tmpM, S).data
 
-        grDhDphi[i] = (tmpV.sum() - ll) / eps
-        grDh[:, i] = (tmpV.data - grM) / eps
+        grDhDphi[i] = (tmpV.sum() - grM.sum()) / eps
+        grDh[:, i] = (tmpV - grM) / eps
 
         phi[i] -= eps
 
-    print(dH - grDh)
+    print(dHdPhi - grDhDphi)
 
+
+def testDphiDtheta(params):
+    """
+    Проверяем правильно ли мы посчитали d log Phi / d Theta
+    (второй множитель в произведении, которое дает искомый градиент).
+    Реализация практически совпадает с тестом градиента.
+    """
+    N, T, G = params
+    S = Spectrum.from_file(filename)
+    phi, M, _, dphi = model_grad((N, T, G), S, ns, pts, True)
+
+    phix, Mx = model_grad((N + eps, T, G), S, ns, pts)
+    phiy, My = model_grad((N, T, G + eps), S, ns, pts)
+    phiz, Mz = model_grad((N, T + eps, G), S, ns, pts)
+    gr = numpy.zeros((pts, 3))
+
+    for i in range(pts):
+        gr[i][0] = (phix[i] - phi[i]) / eps
+        gr[i][1] = (phiy[i] - phi[i]) / eps
+        gr[i][2] = (phiz[i] - phi[i]) / eps
+
+    print(dphi - gr)
 
 def testGradient(params):
     """
     Тестируем правильно ли посчитался градиент.
     """
     N, T, G = params
-    S = Spectrum.from_file("data/1_AraTha_4_Hub/fs_data.fs")
-    phi, M, gradient = model_grad((N, T, G), S, ns, pts)
+    S = Spectrum.from_file(filename)
+    phi, M, gradient, _ = model_grad((N, T, G), S, ns, pts, True)
     ll = Inference.ll(M, S)
 
-    phix, Mx, _ = model_grad((N + eps, T, G), S, ns, pts)
-    phiy, My, _ = model_grad((N, T, G + eps), S, ns, pts)
-    phiz, Mz, _ = model_grad((N, T + eps, G), S, ns, pts)
+    phix, Mx = model_grad((N + eps, T, G), S, ns, pts)
+    phiy, My = model_grad((N, T, G + eps), S, ns, pts)
+    phiz, Mz = model_grad((N, T + eps, G), S, ns, pts)
 
     llx = Inference.ll(Mx, S)
     lly = Inference.ll(My, S)
@@ -440,4 +467,4 @@ def testGradient(params):
 
 if __name__ == "__main__":
     params = (0.149, 0.023, 0)
-    testDmDphi(params)
+    testDphiDtheta(params)
