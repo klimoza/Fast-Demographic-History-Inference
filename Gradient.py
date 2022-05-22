@@ -1,3 +1,5 @@
+import math
+
 import numpy
 from dadi import Integration, Numerics, tridiag, Spectrum, PhiManip, Inference
 
@@ -5,6 +7,7 @@ from dadi import Integration, Numerics, tridiag, Spectrum, PhiManip, Inference
 def tridiag_inverse(A):
     """
     Функция, обращающая невырожденную трехдиагональную матрицу за O(n^2).
+
     https://en.wikipedia.org/wiki/Tridiagonal_matrix#Inversion
     """
     n = A.shape[0]
@@ -44,6 +47,7 @@ def tridiag_inverse(A):
 def make_matrix(a, b, c):
     """
     Функция, составляющая трехдиагональную матрицу, по данным коэффициентам:
+
     b c 0 . 0 0
     a b c . 0 0
     0 a b . 0 0
@@ -102,7 +106,7 @@ pts = 40
 filename = "data/1_AraTha_4_Hub/fs_data.fs"
 
 
-def give_me_everything(phi, xx, nu=1, gamma=0, h=0.5, beta=1):
+def give_me_everything(xx, nu=1, gamma=0, h=0.5, beta=1):
     """
     Функция, возвращающая:
     - коэффициенты a, b, c нашего трехдиагонального уравнения без коэффициентов Delta_t и единицы в b
@@ -120,29 +124,28 @@ def give_me_everything(phi, xx, nu=1, gamma=0, h=0.5, beta=1):
     dfactor = Integration._compute_dfactor(dx)
     delj = Integration._compute_delj(dx, MInt, VInt)
 
-    n = phi.size
-    dA = numpy.zeros((n, n, 3))
+    dA = numpy.zeros((pts, pts, 3))
 
-    a = numpy.zeros(n)
+    a = numpy.zeros(pts)
     a[1:] += dfactor[1:] * (-MInt * delj - V[:-1] / (2 * dx))
-    for i in range(1, n):
+    for i in range(1, pts):
         dA[i][i - 1][0] += dfactor[i] * xx[i - 1] * (1 - xx[i - 1]) / (2 * dx[i - 1]) / (nu ** 2)
         dA[i][i - 1][1] += -dfactor[i] * (1 / 2) * ((xx[i - 1] + xx[i]) / 2) * (1 - (xx[i - 1] + xx[i]) / 2)
 
-    c = numpy.zeros(n)
+    c = numpy.zeros(pts)
     c[:-1] += -dfactor[:-1] * (-MInt * (1 - delj) + V[1:] / (2 * dx))
-    for i in range(0, n - 1):
+    for i in range(0, pts - 1):
         dA[i][i + 1][0] += dfactor[i] * xx[i + 1] * (1 - xx[i + 1]) / (2 * dx[i] * nu * nu)
         dA[i][i + 1][1] += dfactor[i] * (1 / 2) * ((xx[i] + xx[i + 1]) / 2) * (1 - (xx[i] + xx[i + 1]) / 2)
 
-    b = numpy.zeros(n)
+    b = numpy.zeros(pts)
     b[:-1] += -dfactor[:-1] * (-MInt * delj - V[:-1] / (2 * dx))
-    for i in range(0, n - 1):
+    for i in range(0, pts - 1):
         dA[i][i][0] += -dfactor[i] * xx[i] * (1 - xx[i]) / (2 * dx[i]) / (nu ** 2)
         dA[i][i][1] += dfactor[i] * (1 / 2) * ((xx[i] + xx[i + 1]) / 2) * (1 - (xx[i] + xx[i + 1]) / 2)
 
     b[1:] += dfactor[1:] * (-MInt * (1 - delj) + V[1:] / (2 * dx))
-    for i in range(1, n):
+    for i in range(1, pts):
         dA[i][i][0] += -dfactor[i] * xx[i] * (1 - xx[i]) / (2 * dx[i - 1] * nu * nu)
         dA[i][i][1] += -dfactor[i] * (1 / 2) * ((xx[i - 1] + xx[i]) / 2) * (1 - (xx[i - 1] + xx[i]) / 2)
 
@@ -166,7 +169,8 @@ def find_gradient_one_pop(phi, xx, dphi, T, nu=1, gamma=0, h=0.5, theta0=1, init
     Функция, интегрирующая одну эпоху.
     Параллельно с phi, считает еще и производную phi по параметрам (nu, gamma, T).
     """
-    a, b, c, A, dA, dt = give_me_everything(phi, xx, nu, gamma, h, beta)
+    a, b, c, A, dA, dt = give_me_everything(xx, nu, gamma, h, beta)
+
     current_t = initial_t
     inv_A = inverse(dt * a, 1 + dt * b, dt * c)
     while current_t < T:
@@ -176,13 +180,14 @@ def find_gradient_one_pop(phi, xx, dphi, T, nu=1, gamma=0, h=0.5, theta0=1, init
             dphi = inv_A.dot(dphi)
         else:
             inv_A = inverse(this_dt * a, 1 + this_dt * b, this_dt * c)
+
             dphi[1][-1] += 1 / xx[1] * theta0 / 2 * 2 / (xx[2] - xx[0])
             dphi = inv_A.dot(dphi)
 
-        phi[1] += this_dt / xx[1] * theta0 / 2 * 2 / (xx[2] - xx[0])
+        phi = Integration._inject_mutations_1D(phi, this_dt, xx, theta0)
 
         if current_t + this_dt != T:
-            dinv = - this_dt * tens_mult(tens_mult(inv_A, dA), inv_A)
+            dinv = - tens_mult(tens_mult(inv_A, this_dt * dA), inv_A)
             dphi += tens_vec_mult(dinv, phi)
         else:
             dA = this_dt * dA
@@ -196,65 +201,56 @@ def find_gradient_one_pop(phi, xx, dphi, T, nu=1, gamma=0, h=0.5, theta0=1, init
     return dphi, phi
 
 
-def comb_fun(ns, i, x):
+def comb_fun(i, x):
     """
     Производная функции, по которой мы интегрируем в ячейке нашего АЧС.
     Сама функция -- это выражение ниже, домноженное на phi[x]
     """
-    return Numerics.comb(ns, i) * x ** i * (1 - x) ** (ns - i)
+    return Numerics.comb(ns, i) * x**i * (1 - x)**(ns - i)
 
 
-def findCellGradient(xx, ns):
+def findCellGradient(xx):
     """
     Ищем производную dM/dPhi => размерность должна быть N x G
-    x := точки
-    ns := размер M - 1
+
     Так как там сумма по phi на сетке, то в j-ой координате должен остаться коэффициент при это phi-шке.
-    Для этого нужно смотреть как считается АЧС в коде dadi.
-    Видимо АЧС это просто trapezoidal rule, поэтому пишем ровно то что хочется.
+    Коэффициенты берем из метода трапеций, относительно numpy.trapz погрешность около 1e-12.
     """
-    res = numpy.zeros((ns + 1, len(xx)))
+    res = numpy.zeros((ns + 1, pts))
     for i in range(ns + 1):
-        res[i][0] = comb_fun(ns, i, xx[0]) * (xx[1] - xx[0])
+        res[i][0] = comb_fun(i, xx[0]) * (xx[1] - xx[0]) / 2
         for j in range(1, len(xx) - 1):
-            res[i][j] = comb_fun(ns, i, xx[j]) * (xx[j + 1] - xx[j - 1]) / 2
-        res[i][-1] = comb_fun(ns, i, xx[-1]) * (xx[-1] - xx[-2]) / 2
+            res[i][j] = comb_fun(i, xx[j]) * (xx[j + 1] - xx[j - 1]) / 2
+        res[i][-1] = comb_fun(i, xx[-1]) * (xx[-1] - xx[-2]) / 2
     return res
 
 
-def findLLdPhi(xx, M, S, ns):
+def findLLdPhi(xx, M, S, multinom=True):
     """
     Ищем производную d log H / d Phi => размерность должна быть 1 x G
-    xx := точки
-    M := model.data
-    S := data.data
-    ns := размер M - 1
-    С нормированием пока что туго, поэтому пока что считаем что все считается честно.
-    Тем не менее предполагаемая формула для общего случая закомментирована в цикле.
+    M := model
+    S := data
     """
-    dM = findCellGradient(xx, ns)
-    result = numpy.zeros((ns + 1, len(xx)))
-    dH = numpy.zeros(len(xx))
-
+    M, S = Numerics.intersect_masks(M, S)
+    dM = findCellGradient(xx)
     A = S.sum()
     B = M.sum()
-    dB = numpy.zeros(len(xx))
+    dB = dM.sum(axis=0)
 
-    for i in range(ns + 1):
-        dB += dM[i]
+    if multinom:
+        f = numpy.array([(-A * (B * dM[:, i] - M * dB[i]) / (B**2) + S * dM[:, i] / M - S * dB[i] / B).sum() for i in range(pts)])
+    else:
+        f = numpy.array([(dM[:, i] * (S / M - 1)).sum() for i in range(pts)])
 
-    for i in range(ns + 1):
-        # result[i] = -A * (B * dM[i] - M[i] * dB) / (B ** 2) + S[i] * dM[i] / M[i] - S[i] * dB / B
-        result[i] = dM[i] * (S[i] / M[i] - 1)
-        dH += result[i]
-    return dH, result, dB
+    dH = Spectrum(f)
+    return dH
 
 
-def findLikelihoodGradient(phi, dphi, xx, M, S, ns):
+def findLikelihoodGradient(dphi, xx, M, S):
     """
     Считаем d log H / d Theta => размерность должна быть 1 x M
     """
-    dH, _, _ = findLLdPhi(xx, M, S, ns)
+    dH = findLLdPhi(xx, M, S, True)
     return dH.dot(dphi)
 
 
@@ -309,7 +305,7 @@ def testInverse():
 
 
 # 1_AraTha_4_Hub/demographic_model_dadi.py
-def model_grad(params, S, ns, pts, grad=False):
+def model_grad(params, S, ns, pts, grad=0):
     """
     Моделируем 1_AraTha_4_Hub, отбросив последнюю эпоху.
     Помимо полученного АЧС возвращаем еще и phi, так как удобно для отладки.
@@ -328,11 +324,23 @@ def model_grad(params, S, ns, pts, grad=False):
         phi = Integration.one_pop(phi, xx, T1, N1, G1)
 
     fs = Spectrum.from_phi(phi, [ns], [xx], force_direct=True)
-    # fs *= 40
-    if grad:
-        return phi, fs, findLikelihoodGradient(phi, dphi, xx, fs, S, ns), dphi
+
+    if grad == 1:
+        return phi, fs, findLikelihoodGradient(dphi, xx, fs, S)
+    elif grad == 2:
+        return phi, fs, findLikelihoodGradient(dphi, xx, fs, S), dphi
     else:
         return phi, fs
+
+
+def testPhiCorrect(params):
+    """
+    Функция проверяет правильно ли считается phi.
+    """
+    S = Spectrum.from_file(filename)
+    myPhi, _, _ = model_grad(params, S, ns, pts, 1)
+    phi, _ = model_grad(params, S, ns, pts)
+    print(myPhi - phi)
 
 
 def testMatrixDerivative(params):
@@ -343,49 +351,107 @@ def testMatrixDerivative(params):
     N, T, G = params
 
     xx = Numerics.default_grid(pts)
-    phi = PhiManip.phi_1D(xx)
 
-    a, b, c, A, dA, dt = give_me_everything(phi, xx, N, G)
-    this_dt = T - T % dt
+    a, b, c, A, dA, dt = give_me_everything(xx, N, G)
+    k = math.floor(T / dt)
+    if k * dt == T:
+        this_dt = dt
+    else:
+        this_dt = T - dt
     dA *= this_dt
     dA[:, :, -1] = A
     A = make_matrix(a * this_dt, 1 + b * this_dt, c * this_dt)
 
-    a, b, c, _, _, _ = give_me_everything(phi, xx, N + eps, G)
+    a, b, c, _, _, _ = give_me_everything(xx, N + eps, G)
     Ax = make_matrix(a * this_dt, 1 + b * this_dt, c * this_dt)
 
-    a, b, c, _, _, _ = give_me_everything(phi, xx, N, G + eps)
+    a, b, c, _, _, _ = give_me_everything(xx, N, G + eps)
     Ay = make_matrix(a * this_dt, 1 + b * this_dt, c * this_dt)
 
-    a, b, c, _, _, _ = give_me_everything(phi, xx, N, G)
-    tmp_dt = (T + eps - T % dt)
+    a, b, c, _, _, _ = give_me_everything(xx, N, G)
+    k = math.floor((T + eps) / dt)
+    if k * dt == T + eps:
+        tmp_dt = dt
+    else:
+        tmp_dt = T + eps - dt
     Az = make_matrix(a * tmp_dt, 1 + b * tmp_dt, c * tmp_dt)
+
+    gr = numpy.zeros((len(xx), len(xx), 3))
+    for i in range(len(xx)):
+        for j in range(len(xx)):
+            gr[i][j][0] = (Ax[i, j] - A[i, j]) / eps
+            gr[i][j][1] = (Ay[i, j] - A[i, j]) / eps
+            gr[i][j][2] = (Az[i, j] - A[i, j]) / eps
+
+    print(dA - gr)
+
+
+def testInverseMatrixDerivative(params):
+    """
+    Функция проверяет правильно ли мы посчитали производную обратной трехдиагональной матрицы.
+    Формула: dA^{-1} = - A^{-1} * dA * A^{-1}
+    """
+    N, T, G = params
+
+    xx = Numerics.default_grid(pts)
+
+    a, b, c, A, dA, dt = give_me_everything(xx, N, G)
+    k = math.floor(T / dt)
+    if k * dt == T:
+        this_dt = dt
+    else:
+        this_dt = T - dt
+    dA *= this_dt
+    dA[:, :, -1] = A
+    A = make_matrix(a * this_dt, 1 + b * this_dt, c * this_dt)
+    inv_A = tridiag_inverse(A)
+    assert (isId(inv_A.dot(A)))
+    dInv = -tens_mult(tens_mult(inv_A, dA), inv_A)
+
+    a, b, c, _, _, _ = give_me_everything(xx, N + eps, G)
+    Ax = make_matrix(a * this_dt, 1 + b * this_dt, c * this_dt)
+    invx = tridiag_inverse(Ax)
+    assert (isId(invx.dot(Ax)))
+
+    a, b, c, _, _, _ = give_me_everything(xx, N, G + eps)
+    Ay = make_matrix(a * this_dt, 1 + b * this_dt, c * this_dt)
+    invy = tridiag_inverse(Ay)
+    assert (isId(invy.dot(Ay)))
+
+    a, b, c, _, _, _ = give_me_everything(xx, N, G)
+    k = math.floor((T + eps) / dt)
+    if k * dt == T + eps:
+        tmp_dt = dt
+    else:
+        tmp_dt = T + eps - dt
+    Az = make_matrix(a * tmp_dt, 1 + b * tmp_dt, c * tmp_dt)
+    invz = tridiag_inverse(Az)
+    assert (isId(invz.dot(Az)))
 
     gr = numpy.zeros((len(xx), len(xx), 3))
     for i in range(0, len(xx)):
         for j in range(0, len(xx)):
-            gr[i][j][0] = (Ax[i, j] - A[i, j]) / eps
-            gr[i][j][1] = (Ay[i, j] - A[i, j]) / eps
-            gr[i][j][2] = (Az[i, j] - A[i, j]) / eps
-    # Now we need somehow compare gr and dA. It isn't necessary though, if you don't need to test anything.
-    print(dA - gr)
+            gr[i][j][0] = (invx[i, j] - inv_A[i, j]) / eps
+            gr[i][j][1] = (invy[i, j] - inv_A[i, j]) / eps
+            gr[i][j][2] = (invz[i, j] - inv_A[i, j]) / eps
+
+    print(dInv - gr)
 
 
 def testCell(params):
     """
     Функция проверяет правильно ли мы посчитали градиент АЧС по Phi.
-    Для полноценной работы нужно еще что-то дописать, но основная структура написана.
     """
     N, T, G = params
     S = Spectrum.from_file(filename)
     xx = Numerics.default_grid(pts)
-    phi, M, _ = model_grad((N, T, G), S, ns, pts)
-    cell = findCellGradient(xx, ns)
+    phi, M = model_grad((N, T, G), S, ns, pts)
+    cell = findCellGradient(xx)
 
     man = numpy.zeros((ns + 1, pts))
     for i in range(pts):
         phi[i] += eps
-        man[:, i] = (Spectrum.from_phi(phi, [ns], [xx]).data - M.data) / eps
+        man[:, i] = (Spectrum.from_phi(phi, [ns], [xx], force_direct=True).data - M.data) / eps
         phi[i] -= eps
 
     print(cell - man)
@@ -400,22 +466,20 @@ def testDmDphi(params):
     N, T, G = params
     S = Spectrum.from_file(filename)
     xx = Numerics.default_grid(pts)
-    phi, M, gradient = model_grad((N, T, G), S, ns, pts)
-    dHdPhi, dH, dB = findLLdPhi(xx, M.data, S.data, ns)
+    phi, M = model_grad((N, T, G), S, ns, pts)
 
-    grDhDphi = numpy.zeros(pts)  # dHdPhi
-    grDh = numpy.zeros((ns + 1, pts))  # Terms
+    dHdPhi = findLLdPhi(xx, M, S, True)
+    grDhDphi = numpy.zeros(pts)
 
-    grM = Inference.ll_per_bin(M, S).data
+    grM = Inference.ll_multinom_per_bin(M, S)
 
     for i in range(pts):
         phi[i] += eps
 
         tmpM = Spectrum.from_phi(phi, [ns], [xx], force_direct=True)
-        tmpV = Inference.ll_per_bin(tmpM, S).data
+        tmpV = Inference.ll_multinom_per_bin(tmpM, S)
 
         grDhDphi[i] = (tmpV.sum() - grM.sum()) / eps
-        grDh[:, i] = (tmpV - grM) / eps
 
         phi[i] -= eps
 
@@ -430,7 +494,7 @@ def testDphiDtheta(params):
     """
     N, T, G = params
     S = Spectrum.from_file(filename)
-    phi, M, _, dphi = model_grad((N, T, G), S, ns, pts, True)
+    phi, M, _, dphi = model_grad((N, T, G), S, ns, pts, 2)
 
     phix, Mx = model_grad((N + eps, T, G), S, ns, pts)
     phiy, My = model_grad((N, T, G + eps), S, ns, pts)
@@ -444,27 +508,29 @@ def testDphiDtheta(params):
 
     print(dphi - gr)
 
+
 def testGradient(params):
     """
     Тестируем правильно ли посчитался градиент.
     """
     N, T, G = params
     S = Spectrum.from_file(filename)
-    phi, M, gradient, _ = model_grad((N, T, G), S, ns, pts, True)
-    ll = Inference.ll(M, S)
+    phi, M, gradient = model_grad((N, T, G), S, ns, pts, 1)
+    ll = Inference.ll_multinom(M, S)
 
     phix, Mx = model_grad((N + eps, T, G), S, ns, pts)
     phiy, My = model_grad((N, T, G + eps), S, ns, pts)
     phiz, Mz = model_grad((N, T + eps, G), S, ns, pts)
 
-    llx = Inference.ll(Mx, S)
-    lly = Inference.ll(My, S)
-    llz = Inference.ll(Mz, S)
+    llx = Inference.ll_multinom(Mx, S)
+    lly = Inference.ll_multinom(My, S)
+    llz = Inference.ll_multinom(Mz, S)
     grad = [(llx - ll) / eps, (lly - ll) / eps, (llz - ll) / eps]
 
     print(gradient - grad)
 
 
 if __name__ == "__main__":
+    dt = 0.000596
     params = (0.149, 0.023, 0)
-    testDphiDtheta(params)
+    testGradient(params)
